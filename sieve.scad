@@ -4,22 +4,15 @@
 // Radius.
 	shellRadius = 120;
 // Chamber Height.
-	shellChamberHeight = 30;
+	shellChamberHeight = 15;
 // Top Height
-	shellHeightTop = 5;
+	shellHeightTop = 15;
 // Bottom Height
 	shellHeightBottom = 8;
 // Chambers
-	shellChamberChannels = 1;
+	shellChamberChannels = 2;
 // Skin Thickness (Suggested: Radius * 0.02)
 	shellThickness = 2;
-// Stacking Lip
-	shellLipType = "inside"; // [ "inside", "outside", "none" ]
-// Handle spring
-	handleSector = 30; // [ 15 : 5 : 45 ]
-// Handle Spring depth factor
-	handleSize = 1; // [ 0.5 : 0.1 : 1.5 ]
-
 
 /* [ Disk ] */
 // Enabled
@@ -37,36 +30,28 @@
 // Rectangle dimension y
 	diskHoleSizeY = 10;
 
-/* [ Other ] */
-// Tolerance/Clearance for gaps that will be sealed when assembled.
-	tolerance = 0.2;
-// Draw 
-	drawMode = "assembled"; // [ "assembled", "print" ]
+/*
+	potential features/vairables
+		- distinct handle/seam securing bracket piece, using standard notches
+		- handle variability or removal
+		- top lip inside, outside, disabled
+		- more checks to ensure correct placements and that features exist/useful (enough thickness etc)
+		- draw mode assembled for preview or printable flat arranged
+*/
 
-assert( diskThickness > 0, "Disk should probably exist." );
+assert( diskThickness > 0, "Disk should exist." );
 $fn = 100;
 overlap = 0.001;
 
-// twist lock clipper
-// lip support disk
-// revolution lofting for add/remove groove/channel
-// mesh reduce depth on disk
-
-// bite question:
-// will user get tricky bout this? maybe test thickness/disk depth
-// dynamically select max holeChamfer depth (half disk depth) in case
-
-
 module disk(internal = false, offset = 0) {
-	diskBite = shellThickness/2; // locking cut of disk into shell
-    r1 = shellRadius - shellThickness + diskBite + offset; // main radius
-    r2 = r1 - diskBite; // holeChamfered top/bottom surface radius
+	diskBite = shellThickness/2; 
+    r1 = shellRadius - shellThickness + diskBite + offset; 
+    r2 = r1 - diskBite; 
     diskChamferDepth = diskBite;
     diskStraightDepth = diskThickness - diskChamferDepth*2 + ((sqrt(2) - 1) * offset)*2;
 
 	diskCoreThickness = diskThickness * (1 - diskCoreThicknessRatio);
 	diskCoreFloor = - diskThickness/2 + diskCoreThickness;
-	// diskCoreRadius = shellRadius * (1 - diskCoreRadiusRatio);
 	diskCoreRadius = shellRadius - shellThickness - shellRadius * diskCoreRadiusRatio;
 
 	// generate half the disk plate
@@ -93,21 +78,17 @@ module disk(internal = false, offset = 0) {
 		}
 	}
 
-
-	// do some initial pre thinking about chamfers.. 
-		// inclusive or exclusive... chamfer really not necessarily crucially important as long as we get some.
-		// previously diskCoreThickness/3...
 	holeWallContact = 0.4; // between chamfer 
 	holeWallDesired = 1.2; // between holes
 	holeChamfer = (holeWallDesired - holeWallContact)/2;
 
+	// individual grate hole mask/negative
 	module holeCutter() {
 		h = diskCoreThickness;
 
-		// holeChamfer is informed by wall width which gives hard limits
-
+		// slice for quasi lofting
 		module slice(offset_amount) {
-			// We use offset to expand the rectangle evenly on all sides
+			// to use 3d hulling
 			linear_extrude(0.001)
 				offset(delta = offset_amount)
 					square([diskHoleSize, diskHoleSizeY], center=true);
@@ -129,24 +110,17 @@ module disk(internal = false, offset = 0) {
 				cylinder(h=holeChamfer, r1=(diskHoleSize/2)*f, r2=(diskHoleSize/2 + holeChamfer)*f, $fn=fn);
 			}
 		} else if (diskHoleType == "rectangle") {
-			// introduce rounding by way of offset?
-			// cube([diskHoleSize, diskHoleSizeY, h], center=true);
-
-			// w: width, l: length, h: total plate thickness, c: chamfer depth
 			union() {
-				// 1. Bottom Chamfer (Hull between expanded base and standard size)
 				hull() {
 					slice(holeChamfer); 
 					translate([0, 0, holeChamfer]) 
 					slice(0);
 				}
 
-				// 2. Middle Straight Section
 				translate([0, 0, holeChamfer])
 					linear_extrude(diskCoreThickness - 2*holeChamfer)
 						square([diskHoleSize, diskHoleSizeY], center=true);
 
-				// 3. Top Chamfer (Hull between standard size and expanded top)
 				translate([0, 0, diskCoreThickness - holeChamfer])
 				hull() {
 					slice(0);
@@ -160,20 +134,17 @@ module disk(internal = false, offset = 0) {
 	// pack hole negatives and intersect the set with internal safety cylinder radius 
 	module holeArray() {
 		overdraw = true;
-		// nesting hex/circular rows with sin(60) 
 		dx = (diskHoleType == "rectangle") ? (diskHoleSize + holeWallDesired) : (diskHoleSize + holeWallDesired);
 		dy = (diskHoleType == "rectangle") ? (diskHoleSizeY + holeWallDesired) : dx / sin(60);
 
 		// optionally allow overdrawing... kind of looks better to me
-
 		for (x = [-shellRadius: dx : shellRadius]) {
-			// Offset every other column for hex packing
 			colIndex = round(x / dx);
 			isOdd = (colIndex % 2 != 0);
 			yOffset = (diskHoleType != "rectangle" && isOdd) ? dy/2 : 0;
 
 			for (y = [-shellRadius: dy : shellRadius]) {
-				// Pythagorean check: Is this hole's center inside the core?
+				// under draw circle check
 				if (!overdraw && sqrt(pow(x, 2) + pow(y + yOffset, 2)) < diskCoreRadius - (diskHoleSize/2)) {
 					translate([x, y + yOffset, 0])
 					holeCutter();
@@ -202,8 +173,23 @@ module disk(internal = false, offset = 0) {
 }
 
 module shell() {
+	// Shell
 	totalHeight = shellHeightBottom + shellHeightTop + shellChamberHeight * shellChamberChannels;
+	// Handle 
+	handleSector = 30;
+	handleSize = 1;
+	handleChord = 2 * shellRadius * sin(handleSector / 2);
+	connectorChord = handleChord * 0.8;
+	handleFillet = 5;
+	connectionDepth = 8 + 2.1*handleFillet * handleSize;     
+	handleDepth = 10 * handleSize;   
+	handleOuterRadius = shellRadius + connectionDepth + handleDepth ;
+	handleInnerRadius = shellRadius + connectionDepth;
 
+	bowOut = shellRadius * (1 - cos(handleSector / 2)); 
+	overlap = bowOut + 2; 
+
+	// distributing loop for channels and lips
 	module channelDistribute() {
 		for(i = [0 : 1 : shellChamberChannels - 1]) {
 			translate([0,0,i*shellChamberHeight + shellHeightBottom])
@@ -211,6 +197,7 @@ module shell() {
 		}
 	}
 
+	// generate internal lips for channels and top
 	module lip(isTop = false) {
 		lipSize = isTop ? shellThickness : diskThickness*1.2;
 		lipOffSet = 0.5;
@@ -246,6 +233,7 @@ module shell() {
 		}
 	}
 
+	// apply channels loop takes children
 	module channeling() {
 		union() {
 			difference() {
@@ -267,6 +255,7 @@ module shell() {
 		}
 	}
 
+	// seam
 	module seamCutter() {
 		split = 0.2;
 		// add inward protrusion to slice lips 
@@ -291,46 +280,6 @@ module shell() {
 		}
 	}
 
-	// Method:
-		// create simple 2d shape, naturally inset of the desired result
-
-		// fully integrated handle or bracket prongs with no outer connection?
-		// probably easier to design fully integrated
-
-		// main cylinder still distinct part
-			// clyinder with channel add channel sub
-			// seam cut
-
-		// handle/bracket piece:
-			// derive guiding dimension by sector angle
-			// straight segment extending out of core shell 
-				// enough room for clips/locks/nutsbolts
-			// concentric sector area for handle outer.
-			// offset offset/bool
-			// holes/slots for clip lock nut bolt whatever.
-				// as close to skin as possible, without cutting in
-				// would need to cut in if skin were really thick, but that is an abuse of use case, so buzz off
-			// channelSubs
-
-		// then merge the two.
-
-		// or to get fillets at  the connection point, do much the same but from 2d merge and then need to re-introduce the extension of cylinder in between the handle.
-
-		// fillets did not arise at connection point, rethink:
-			// instead of simply providing a rectangle connecting the main circle and the concentric handle, create an additional C ring to offset and subtract, which will confer rounding to connection.
-			
-	// Handle stuff
-	handleChord = 2 * shellRadius * sin(handleSector / 2);
-	connectorChord = handleChord * 0.8;
-	handleFillet = 5;
-	connectionDepth = 10 + 2.1*handleFillet * handleSize;     
-	handleDepth = 2*handleFillet * handleSize;   
-	handleOuterRadius = shellRadius + connectionDepth + handleDepth ;
-	handleInnerRadius = shellRadius + connectionDepth;
-
-	bowOut = shellRadius * (1 - cos(handleSector / 2)); 
-	overlap = bowOut + 2; 
-
 	// core shell + bracket extension
 	module shellProfile() {
 		union() {
@@ -341,7 +290,7 @@ module shell() {
 		}
 	}
 
-	// concentric handle/spring
+	// concentric handle/spring additive
 	module handleAddProfile() {
 		offset(handleFillet)
 		intersection() {
@@ -356,6 +305,7 @@ module shell() {
 		}
 	}
 
+	// concentric handle/spring subtractive
 	module handleCutProfile() {
 		offset(handleFillet)
 		difference() {
@@ -369,15 +319,9 @@ module shell() {
 		}
 	}
 
-	module profileThrown() {
-		shellProfile();
-		#handleCutProfile();
-		handleAddProfile();
-	}
-
+	// profile assembled
 	module profile() {
 		module profileFill() {
-			//offset(shellThickness*1)
 			difference() {
 				union() {
 					shellProfile();
@@ -388,7 +332,6 @@ module shell() {
 		}
 
 		union() {
-			// create stroke
 			difference() {
 				profileFill();
 				offset(-shellThickness)
@@ -402,8 +345,19 @@ module shell() {
 		}
 	}
 
-	// profile();
+	// notch hexagonals
+	module notching() {
+		notchSize = 2;
 
+		for (z = [0 : totalHeight/3 : totalHeight]) {
+			translate([shellRadius + connectionDepth/2 - handleFillet,handleChord/2,z])
+			rotate([90,0,0])
+			linear_extrude(handleChord)
+			circle(notchSize, $fn=6);
+		}
+	}
+
+	// full assembly: extrude profile, add channels, seam, notches
 	module assemble() {
 		difference(){ 
 			union() {
@@ -414,55 +368,22 @@ module shell() {
 			}
 
 			linear_extrude(totalHeight*1.5)
-			#seamCutter();
+			seamCutter();
+
+			notching();
 		}
 	}
 
 	assemble();
-
 }
 
-module clippingView() {
-	difference() {
-		children();
-		translate([0,0,-500])
-		cube([1000,1000, 1000]);
-	}
-}
-
-// Draw
 render() {
 	if (diskEnabled) {
-		// if (shellEnabled) translate([0,0,shellHeightBottom])
-		// disk();
+		if (shellEnabled) translate([0,0,shellHeightBottom])
+		disk();
 	}
 
 	if (shellEnabled) {
 		shell();
 	}
 }
-
-/*
-
-	// Shell
-		Create total height cylinder at radius
-		Add disk channels bulge at chamber interval
-		Cut disk channel interior (-thickness)
-			disc shapes with 45 deg holeChamfer ending at total radius - thickness
-		add handle workpiece, tangential omega type of block in any case
-			- bracket has notches and holes for bolts, for locking using additional parts or bands
-			- slide lock produces small lips vertically to act as channels for additional slide piece
-			- integrated lock produces similar shape to slide lock assembled, but integral and hollow for flexing
-		cut through seam.
-		slide handle is generated distinctly or boolean split away from workpiece, whichever is simplest 
-
-	// disk
-		module can produce a solid, to be used in creation of shell disk channels
-
-		cylinder 45 deg extrude, mirrored
-		loop to array holes, by way of arraying a small solid, and then intersecting with a cylinder interior to the broader shell cylinder
-		then substract the contained hole part.
-
-	// That's about it. in the broader draw module it can be drawn in assembled positions (disk displaced upwards to (first) channel) 
-		// or as printable, disk displaced away by radius of shell, slide lock if existing, oriented 90 deg, for layer lines with a smooth slide normal to shell layer lines
-*/
