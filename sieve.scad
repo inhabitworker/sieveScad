@@ -13,10 +13,16 @@
 	shellChamberChannels = 2;
 // Skin Thickness (Suggested: Radius * 0.02)
 	shellThickness = 2;
+// Lock piece percent of total height
+    lockHeightRatio = 0.5; // [ 0.1 : 0.1 : 1.0 ]
+// Lock stopper position ratio
+    lockStopperPosition = 0.3; // [ 0.0 : 0.1 : 1.0 ]
+// stacking lip height
+    topLipHeight = 5; // [ 0 : 0.1 : 10 ]
 
 /* [ Disk ] */
 // Enabled
-	diskEnabled = true;
+	diskEnabled = false;
 // Disk thickness
 	diskThickness = 3;
 // Central thickness % (grate, optimise print time)
@@ -43,9 +49,15 @@ assert( diskThickness > 0, "Disk should exist." );
 $fn = 100;
 overlap = 0.001;
 
+totalHeight = shellHeightBottom + shellHeightTop + shellChamberHeight * shellChamberChannels;
+lockStopperSize = 1;
+// disk parameter/variable pulled out for handle uninterruption
+biteTolerance = 0.2;
+diskBite = shellThickness/2; 
+channelExtent = shellRadius - shellThickness + diskBite - biteTolerance; 
+
 module disk(internal = false, offset = 0) {
-	diskBite = shellThickness/2; 
-    r1 = shellRadius - shellThickness + diskBite + offset; 
+    r1 = channelExtent + offset;
     r2 = r1 - diskBite; 
     diskChamferDepth = diskBite;
     diskStraightDepth = diskThickness - diskChamferDepth*2 + ((sqrt(2) - 1) * offset)*2;
@@ -172,10 +184,8 @@ module disk(internal = false, offset = 0) {
 	}
 }
 
-module shell() {
-	// Shell
-	totalHeight = shellHeightBottom + shellHeightTop + shellChamberHeight * shellChamberChannels;
-	// Handle 
+module shell(lock = false) {
+    // Handle 
 	handleSector = 30;
 	handleSize = 1;
 	handleChord = 2 * shellRadius * sin(handleSector / 2);
@@ -189,6 +199,12 @@ module shell() {
 	bowOut = shellRadius * (1 - cos(handleSector / 2)); 
 	overlap = bowOut + 2; 
 
+    lockThickness = 10;
+    lockOffset = 4;
+    lockRadius = handleOuterRadius + lockThickness;
+    lockWidth = handleChord + 2 * lockThickness;
+    lockFullWidth = lockWidth + lockOffset*2;
+    
 	// distributing loop for channels and lips
 	module channelDistribute() {
 		for(i = [0 : 1 : shellChamberChannels - 1]) {
@@ -201,9 +217,9 @@ module shell() {
 	module lip(isTop = false) {
 		lipSize = isTop ? shellThickness : diskThickness*1.2;
 		lipOffSet = 0.5;
-		lipExtension = isTop ? 3 : 0;
+		lipExtension = isTop ? topLipHeight : 0;
 		lipTotal = lipSize + lipOffSet;
-		stackingTolerance = 0.4;
+		stackingTolerance = 0.2;
 
 		height = isTop ? totalHeight - lipTotal - lipExtension/2: - lipTotal - diskThickness/2;
 
@@ -233,6 +249,7 @@ module shell() {
 		}
 	}
 
+        
 	// apply channels loop takes children
 	module channeling() {
 		union() {
@@ -284,11 +301,42 @@ module shell() {
 	module shellProfile() {
 		union() {
 			circle(r=shellRadius);
-			l = overlap + connectionDepth + 5;
-			translate([shellRadius - overlap + l/2, 0])
-            square([l, connectorChord], center=true);
+            // surface for handle
+            intersection() {
+                translate([0,-lockFullWidth/2])
+                square([shellRadius+diskBite, lockFullWidth]);
+                difference() {
+                    circle(r=shellRadius+diskBite);
+                    circle(r=shellRadius);
+
+                }
+            }  
 		}
 	}
+    
+    module lockStopper() {
+        difference() {     
+            translate([0,0,totalHeight*lockStopperPosition])
+            intersection() {
+                linear_extrude(lockStopperSize)
+                translate([0,-lockFullWidth/2])
+                square([shellRadius+diskBite+lockStopperSize, lockFullWidth]);
+                translate([0,0,lockStopperSize])
+                rotate_extrude()
+                translate([shellRadius+diskBite,0,0])
+                polygon([[0,0], [lockStopperSize,0], [0, -lockStopperSize]]);
+            }
+            
+            linear_extrude(totalHeight)
+            profileFill();
+        }
+    }
+    
+    module connectorProfile() {
+        l = overlap + connectionDepth + 5;
+        translate([shellRadius - overlap + l/2, 0])
+        square([l, connectorChord], center=true);
+    }
 
 	// concentric handle/spring additive
 	module handleAddProfile() {
@@ -304,6 +352,7 @@ module shell() {
 			}
 		}
 	}
+    
 
 	// concentric handle/spring subtractive
 	module handleCutProfile() {
@@ -312,38 +361,39 @@ module shell() {
 			difference() {
 				// + some manner of the straight section desired
 				circle(handleInnerRadius - handleFillet*1.99);
-				circle(shellRadius + handleFillet);
+				circle(shellRadius + handleFillet+diskBite);
 			}
 			translate([shellRadius, 0, 0])
 			square([40,connectorChord], center=true);
 		}
 	}
+    
+    module profileFill() {
+        difference() {
+            union() {
+                shellProfile();
+                connectorProfile();
+                handleAddProfile();
+            }
+                handleCutProfile();
+            }
+    }
 
 	// profile assembled
 	module profile() {
-		module profileFill() {
-			difference() {
-				union() {
-					shellProfile();
-					handleAddProfile();
-				}
-				handleCutProfile();
-			}
-		}
-
 		union() {
 			difference() {
 				profileFill();
 				offset(-shellThickness)
 				profileFill();
 			}
-
-			difference() {
-				circle(r=shellRadius);
-				circle(r=shellRadius - shellThickness);
-			}
+            
+            difference() {
+                circle(r=shellRadius);
+                circle(r=shellRadius - shellThickness);
+            }
 		}
-	}
+	}  
 
 	// notch hexagonals
 	module notching() {
@@ -365,6 +415,7 @@ module shell() {
 				linear_extrude(totalHeight)
 				profile();
 				lip(true);
+                lockStopper();
 			}
 
 			linear_extrude(totalHeight*1.5)
@@ -373,8 +424,26 @@ module shell() {
 			notching();
 		}
 	}
-
-	assemble();
+    
+    module lock() {
+        linear_extrude(totalHeight*lockHeightRatio)
+        difference() {
+            offset(lockOffset)
+            intersection() {
+                translate([0,-lockWidth/2])
+                square([lockRadius, lockWidth]);
+                circle(r=handleOuterRadius + lockThickness);
+            }
+            profileFill();
+        }
+            
+    }
+    
+    if (lock) {
+        lock();
+    } else {
+    	assemble();
+    }
 }
 
 render() {
@@ -385,5 +454,8 @@ render() {
 
 	if (shellEnabled) {
 		shell();
+        color("red")
+        translate([0,0,totalHeight*lockStopperPosition+lockStopperSize])
+        shell(true);
 	}
 }
